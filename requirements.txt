@@ -1,0 +1,2 @@
+# Install in a Python virtual environment; pin exact versions after validation.
+dbt-snowflake>=1.9,<2.0

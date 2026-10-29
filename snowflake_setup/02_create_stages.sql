@@ -1,0 +1,2 @@
+-- TODO: Verify public S3 paths, access permissions, and Parquet schemas
+-- before creating external stages. No unverified ingestion SQL yet.

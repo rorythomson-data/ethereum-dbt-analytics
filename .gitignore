@@ -1,0 +1,22 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+# dbt
+target/
+dbt_packages/
+logs/
+# Local secrets and credentials
+.env
+.env.*
+!.env.example
+profiles.yml
+*.pem
+*.p8
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

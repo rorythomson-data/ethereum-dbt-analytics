@@ -1,0 +1,2 @@
+-- TODO: Define raw tables and bounded COPY INTO commands after
+-- inspecting the source data and selecting a small extraction window.

@@ -1,0 +1,15 @@
+# Example only. Copy the configuration to ~/.dbt/profiles.yml,
+# update placeholders, and never commit real credentials.
+ethereum_portfolio:
+  target: dev
+  outputs:
+    dev:
+      type: snowflake
+      account: YOUR_ACCOUNT_IDENTIFIER
+      user: YOUR_USERNAME
+      password: YOUR_PASSWORD
+      role: YOUR_ROLE
+      database: ETHEREUM_PORTFOLIO
+      warehouse: DBT_WH
+      schema: ANALYTICS
+      threads: 2
