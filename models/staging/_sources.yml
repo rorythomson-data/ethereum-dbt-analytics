@@ -1,0 +1,21 @@
+
+version: 2
+
+sources:
+  - name: ethereum_raw
+    description: "Raw Ethereum blockchain data loaded from public AWS S3 Parquet files."
+    database: ETHEREUM_PORTFOLIO
+    schema: RAW
+
+    tables:
+      - name: transactions
+        identifier: TRANSACTIONS
+        description: "Raw Ethereum transaction records."
+
+      - name: token_transfers
+        identifier: TOKEN_TRANSFERS
+        description: "Raw token-transfer events associated with Ethereum transactions."
+
+      - name: contracts
+        identifier: CONTRACTS
+        description: "Raw Ethereum smart contract records."

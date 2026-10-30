@@ -1,0 +1,20 @@
+
+version: 2
+
+models:
+  - name: stg_transactions
+    description: >
+      Standardized Ethereum transactions extracted from
+      semi-structured RAW records. One row per transaction.
+
+    columns:
+      - name: transaction_hash
+        description: "Unique Ethereum transaction identifier."
+        data_tests:
+          - not_null
+          - unique
+
+      - name: block_timestamp
+        description: "Timestamp when the transaction's block was produced."
+        data_tests:
+          - not_null

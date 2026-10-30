@@ -1,2 +1,3 @@
-# Install in a Python virtual environment; pin exact versions after validation.
-dbt-snowflake>=1.9,<2.0
+# Stable dbt Core and Snowflake adapter versions.
+dbt-core==1.12.6
+dbt-snowflake==1.12.4

@@ -1,0 +1,27 @@
+
+version: 2
+
+models:
+  - name: stg_contracts
+    description: >
+      Standardized Ethereum smart contract records extracted
+      from RAW data. Source records are preserved, including
+      repeated contract addresses with different block metadata.
+
+    columns:
+      - name: contract_address
+        description: >
+          Ethereum contract address. Not guaranteed to be unique
+          in the source dataset.
+        data_tests:
+          - not_null
+
+      - name: block_number
+        description: "Block number associated with the contract record."
+        data_tests:
+          - not_null
+
+      - name: block_timestamp
+        description: "Timestamp associated with the contract record."
+        data_tests:
+          - not_null

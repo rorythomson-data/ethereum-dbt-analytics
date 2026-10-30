@@ -1,0 +1,31 @@
+
+version: 2
+
+models:
+  - name: stg_token_transfers
+    description: >
+      Standardized Ethereum token transfer events extracted
+      from RAW records. One row per transaction hash and log index.
+
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - transaction_hash
+              - log_index
+
+    columns:
+      - name: transaction_hash
+        description: "Hash of the transaction containing the transfer."
+        data_tests:
+          - not_null
+
+      - name: log_index
+        description: "Position of the event log within its block."
+        data_tests:
+          - not_null
+
+      - name: block_timestamp
+        description: "Timestamp of the block containing the transfer."
+        data_tests:
+          - not_null
