@@ -1,17 +1,16 @@
 # Ethereum Analytics Pipeline — dbt + Snowflake
 
-**Status:** Snowflake infrastructure, public-source ingestion, RAW validation, and the dbt staging layer are complete. Intermediate transformations and analytics marts are planned.
+**Status:** Snowflake infrastructure, public-source ingestion, RAW validation, dbt staging, and the first intermediate model are complete. Analytics marts and additional enhancements are planned.
 
 ## Project Overview
 
 An analytics engineering portfolio project using Ethereum blockchain data to demonstrate ingestion, SQL transformation, data quality testing, and documentation with **Snowflake and dbt Core**.
 
-The project emphasizes layered data modeling, reproducible development samples, source-to-model validation, and a documented approach to source-data anomalies. Planned extensions include reusable intermediate transformations, analytics marts, macros, incremental processing, and lineage documentation.
+The project emphasizes layered data modeling, reproducible development samples, source-to-model validation, and a documented approach to source-data anomalies. The implemented intermediate layer enriches transactions with aggregated token-transfer metrics. Planned extensions include analytics marts, macros, incremental processing, and expanded lineage documentation.
 
 The objective is to demonstrate a reproducible analytics engineering workflow rather than build a production-scale blockchain analytics platform.
 
 ## Technology Stack
-
 | Technology | Purpose |
 |---|---|
 | Snowflake | Ingestion, storage, views, and SQL execution |
@@ -27,33 +26,33 @@ The project uses an **ELT (Extract, Load, Transform)** workflow:
 
 ```text
 AWS S3 — Public Ethereum Data
-             |
-             v
+              |
+              v
 Snowflake External Stages
-             |
-             v
-Snowflake ETHEREUM_PORTFOLIO.RAW
+              |
+              v
+ETHEREUM_PORTFOLIO.RAW
   - TRANSACTIONS
   - TOKEN_TRANSFERS
   - CONTRACTS
-             |
-             v
- dbt Staging Views (complete)
+              |
+              v
+Staging views (complete)
   - stg_transactions
   - stg_token_transfers
   - stg_contracts
-             |
-             v
- dbt Intermediate Models (planned)
-             |
-             v
- dbt Analytics Marts (planned)
+              |
+              v
+Intermediate view (complete)
+  - int_transactions_with_transfers
+              |
+              v
+Analytics marts (planned)
 ```
 
-Snowflake stores the data and executes SQL. **dbt Core runs locally**, compiles model and test SQL, and submits it to Snowflake. The three staging models are configured as views; intermediate models are configured as views and marts as tables when those layers are implemented.
+Snowflake stores the data and executes SQL. **dbt Core runs locally**, compiles model and test SQL, and submits it to Snowflake. The three staging models and first intermediate model are materialized as views. Future marts are configured as tables.
 
 ### Snowflake Resources
-
 | Resource | Name / configuration |
 |---|---|
 | Database | `ETHEREUM_PORTFOLIO` |
@@ -69,7 +68,6 @@ The small development warehouse helps limit unnecessary compute usage.
 ## Data Sources
 
 Source: [AWS Public Blockchain Data](https://registry.opendata.aws/aws-public-blockchain/).
-
 | Dataset | Description |
 |---|---|
 | Transactions | Transaction hashes, addresses, timestamps, value, gas, and execution metadata |
@@ -83,7 +81,9 @@ The current development sample comes from the historical partition **2024-01-15*
 ### External Stages
 
 - `ETH_TRANSACTIONS_STAGE`
+
 - `ETH_TOKEN_TRANSFERS_STAGE`
+
 - `ETH_CONTRACTS_STAGE`
 
 Each RAW table has one `RAW_RECORD VARIANT` column. This preserves source fields and separates ingestion from type casting and normalization in dbt.
@@ -93,7 +93,9 @@ Each RAW table has one `RAW_RECORD VARIANT` column. This preserves source fields
 **Transactions and token transfers:**
 
 1. Select 1,000 distinct transaction hashes from token-transfer events, ordered by hash.
+
 2. Load the corresponding transactions from the same historical partition.
+
 3. Load every token-transfer event associated with those transactions.
 
 This relationship-aware approach provides transaction-to-transfer matches for downstream modeling. An earlier independent transaction sample produced no matching token transfers, so the ingestion strategy was revised.
@@ -103,7 +105,6 @@ This relationship-aware approach provides transaction-to-transfer matches for do
 **Repeatability:** The ingestion script truncates the three RAW tables before reloading them, avoiding accumulation across runs. Sample selection is reproducible provided the underlying source files remain unchanged.
 
 ## RAW Data Validation
-
 | Validation | Result |
 |---|---:|
 | Transactions loaded | 1,000 |
@@ -130,7 +131,6 @@ Both records are **retained in RAW and staging**. The staging model therefore do
 ## dbt Staging Layer — Complete
 
 The staging layer extracts typed columns from RAW `VARIANT` records using `source()` references declared in `models/staging/_sources.yml`.
-
 | Model | Materialization | Grain / key | Validated rows |
 |---|---|---|---:|
 | `stg_transactions` | View | One row per `transaction_hash` | 1,000 |
@@ -140,7 +140,6 @@ The staging layer extracts typed columns from RAW `VARIANT` records using `sourc
 `stg_transactions` standardizes transaction hashes, block metadata, addresses, value in wei, gas fields, and receipt metadata. `stg_token_transfers` retains token amounts in their raw smallest-unit representation because token decimal precision has not been established. `stg_contracts` standardizes contract metadata and bytecode without deduplicating addresses.
 
 ### Automated Tests
-
 | Model | Automated checks | Passing tests |
 |---|---|---:|
 | `stg_transactions` | Non-null transaction hash; unique transaction hash; non-null block timestamp | 3 |
@@ -151,6 +150,59 @@ The staging layer extracts typed columns from RAW `VARIANT` records using `sourc
 The contracts model intentionally has **no unique-address test**, reflecting the documented source anomaly. Manual Snowflake SQL checks additionally verified record counts and the single repeated address.
 
 **Integrated build:** `dbt build --select staging` completed successfully with **3 views created, 10 tests passed, 0 errors (13/13 operations)**.
+
+## dbt Intermediate Layer — First Model Complete
+
+### Transaction Enrichment
+
+**Model:** `int_transactions_with_transfers`  
+**Materialization:** View  
+**Snowflake location:** `ETHEREUM_PORTFOLIO.ANALYTICS`  
+**Grain:** One row per `transaction_hash`.
+
+This model enriches standardized Ethereum transactions with aggregated token-transfer metrics. It references `stg_transactions` and `stg_token_transfers` through dbt `ref()` dependencies.
+
+Token transfers are aggregated by `transaction_hash` **before** joining them to transactions. This avoids one-to-many join fanout, which could otherwise duplicate transaction rows and inflate transaction-level measures such as gas usage. A `LEFT JOIN` retains transactions without matching transfers; `COALESCE` gives those transactions zero transfer counts.
+| Derived column | Meaning |
+|---|---|
+| `transfer_count` | Number of token-transfer events associated with the transaction |
+| `distinct_token_count` | Number of distinct token addresses in those events |
+| `has_token_transfer` | Whether the transaction has at least one associated transfer |
+
+### Intermediate Model Validation
+
+The model was manually validated against the development sample from **2024-01-15** using `snowflake_setup/12_validate_int_transactions_with_transfers.sql`.
+| Validation | Result |
+|---|---:|
+| Intermediate transaction rows | 1,000 |
+| Distinct transaction hashes | 1,000 |
+| NULL transaction hashes | 0 |
+| Total aggregated transfer events | 1,779 |
+| Transactions with transfers | 1,000 |
+| Transactions without transfers | 0 |
+| Minimum transfers per transaction | 1 |
+| Maximum transfers per transaction | 52 |
+
+The results confirm the expected transaction grain and reconcile the aggregate number of transfers with the staging sample. The source sampling strategy deliberately includes only transactions with transfer events; therefore, the `LEFT JOIN` behavior for transactions without transfers is not exercised by this sample.
+
+### Intermediate Model Automated Tests
+
+Five generic tests in `models/intermediate/_int_transactions_with_transfers.yml` check the non-null transaction hash, unique transaction hash, and non-null `transfer_count`, `distinct_token_count`, and `has_token_transfer` values.
+
+Two singular SQL tests provide additional validation:
+
+- `tests/assert_transaction_transfer_metrics.sql` checks logical consistency between transfer counts, distinct token counts, and the transfer indicator.
+- `tests/assert_transaction_transfer_reconciliation.sql` independently aggregates staging transfers and compares the resulting metrics against each intermediate transaction.
+
+All **seven intermediate-model tests passed**. The integrated dependency build also passed:
+
+```bash
+dbt build --select +int_transactions_with_transfers
+```
+
+**Result:** 3 views built, 14 tests passed, 0 execution errors (**17/17 operations**). This selection includes `stg_transactions` and `stg_token_transfers`, but not `stg_contracts`, which is not an upstream dependency.
+
+Across the completed staging and intermediate layers, **four models and 17 tests have passed**. dbt also discovers one additional test outside this validated set.
 
 ## Repository Structure
 
@@ -167,7 +219,8 @@ ethereum-dbt-analytics/
 │   ├── 08_inspect_token_transfers.sql
 │   ├── 09_validate_stg_token_transfers.sql
 │   ├── 10_investigate_contract_duplicates.sql
-│   └── 11_validate_stg_contracts.sql
+│   ├── 11_validate_stg_contracts.sql
+│   └── 12_validate_int_transactions_with_transfers.sql
 ├── models/
 │   ├── staging/
 │   │   ├── _sources.yml
@@ -177,10 +230,14 @@ ethereum-dbt-analytics/
 │   │   ├── _stg_token_transfers.yml
 │   │   ├── stg_contracts.sql
 │   │   └── _stg_contracts.yml
-│   ├── intermediate/             # planned
-│   └── marts/                    # planned
+│   ├── intermediate/
+│   │   ├── int_transactions_with_transfers.sql
+│   │   └── _int_transactions_with_transfers.yml
+│   └── marts/                   # planned
 ├── macros/
 ├── tests/
+│   ├── assert_transaction_transfer_metrics.sql
+│   ├── assert_transaction_transfer_reconciliation.sql
 │   └── manual/
 │       └── test_s3_ingestion.sql
 ├── seeds/
@@ -200,7 +257,7 @@ The numbered `snowflake_setup/` scripts preserve the manual Snowflake developmen
 
 ### 1. Snowflake Environment
 
-Create a Snowflake account with suitable access and compute credits. Execute `01_create_resources.sql` through `05_validate_raw_data.sql` in numerical order in Snowflake worksheets. Scripts `06`–`11` document subsequent manual source inspection, anomaly investigation, and staging validation; run them at the appropriate point after creating the referenced staging views.
+Create a Snowflake account with suitable access and compute credits. Execute `01_create_resources.sql` through `05_validate_raw_data.sql` in numerical order in Snowflake worksheets. Scripts `06`–`12` document subsequent source inspection, anomaly investigation, staging validation, and intermediate-model validation; run them after the referenced views exist.
 
 **Caution:** `04_load_raw_data.sql` truncates and reloads the three RAW tables. It replaces their existing contents.
 
@@ -221,22 +278,28 @@ Copy `profiles.example.yml` to your local `~/.dbt/profiles.yml`, supply your own
 dbt debug
 dbt ls --resource-type source
 dbt build --select staging
+dbt build --select +int_transactions_with_transfers
 ```
 
 `dbt deps` installs the versioned `dbt_utils` dependency. The `package-lock.yml` file records resolved dependencies and should be committed; the generated `dbt_packages/` directory should not.
 
-**Environment note:** During development, an optional `dbt-state` integration prompted browser authentication. The local session used `DBT_ENGINE_MANAGE_STATE=0` to disable it, which produced a reserved-environment-variable deprecation warning. A clean, reproducible long-term configuration for that optional component remains to be resolved; the staging build itself passed.
+**Environment note:** During development, an optional `dbt-state` integration prompted browser authentication. The local session used `DBT_ENGINE_MANAGE_STATE=0` to disable it, which produced a reserved-environment-variable deprecation warning. A clean, reproducible long-term configuration for that optional component remains to be resolved; the staging and intermediate builds themselves passed.
 
 ## Planned dbt Implementation
 
-- **Intermediate models:** Reusable transaction-to-transfer relationships, transformations, and documented treatment of duplicate contract addresses where required.
+- **Further intermediate models:** Additional reusable transformations and documented treatment of duplicate contract addresses where required.
+
 - **Analytics marts:** Analysis-ready datasets and reconciliation checks.
+
 - **Additional tests:** Relationship and business-rule checks, plus selected unit tests.
+
 - **Macros:** Reusable SQL/Jinja logic where beneficial.
+
 - **Incremental processing:** Demonstrate incremental models and rerun behavior.
+
 - **Documentation and lineage:** Expand column descriptions and generated dbt documentation.
 
-These features are **not yet implemented**. Model grain and materialization choices will be finalized during development.
+These extensions are **not yet implemented**. Their model grain and materialization choices will be finalized during development.
 
 ## Data Provenance and Limitations
 

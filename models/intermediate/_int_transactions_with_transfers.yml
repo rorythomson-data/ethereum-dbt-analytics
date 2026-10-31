@@ -1,0 +1,31 @@
+
+version: 2
+
+models:
+  - name: int_transactions_with_transfers
+    description: >
+      Ethereum transactions enriched with aggregated token-transfer
+      metrics. One row per transaction hash, preserving transactions
+      even when they have no associated token transfers.
+
+    columns:
+      - name: transaction_hash
+        description: "Unique Ethereum transaction identifier."
+        data_tests:
+          - not_null
+          - unique
+
+      - name: transfer_count
+        description: "Number of token-transfer events in the transaction."
+        data_tests:
+          - not_null
+
+      - name: distinct_token_count
+        description: "Number of distinct token addresses involved."
+        data_tests:
+          - not_null
+
+      - name: has_token_transfer
+        description: "Whether the transaction has any token-transfer events."
+        data_tests:
+          - not_null
