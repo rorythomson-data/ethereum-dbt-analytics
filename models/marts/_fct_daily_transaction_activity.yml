@@ -1,0 +1,43 @@
+
+version: 2
+
+models:
+  - name: fct_daily_transaction_activity
+    description: >
+      Daily Ethereum transaction activity metrics derived from
+      the validated intermediate transaction model.
+      Each row represents one calendar day. Metrics describe
+      the sampled transactions rather than total network activity.
+
+    columns:
+      - name: activity_date
+        description: Calendar date of the sampled transactions.
+        data_tests:
+          - not_null
+          - unique
+
+      - name: transaction_count
+        description: Number of sampled transactions on the date.
+        data_tests:
+          - not_null
+
+      - name: token_transfer_count
+        description: Total token-transfer events on the date.
+        data_tests:
+          - not_null
+
+      - name: transactions_with_transfers
+        description: Number of transactions with at least one token transfer.
+        data_tests:
+          - not_null
+
+      - name: avg_transfers_per_transaction
+        description: Average token-transfer events per transaction.
+        data_tests:
+          - not_null
+
+      - name: total_gas_used
+        description: Total gas consumed by sampled transactions.
+
+      - name: avg_gas_used
+        description: Average gas consumed per sampled transaction.
