@@ -19,6 +19,10 @@ models:
         description: "Hash of the transaction containing the transfer."
         data_tests:
           - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_transactions')
+                field: transaction_hash
 
       - name: log_index
         description: "Position of the event log within its block."

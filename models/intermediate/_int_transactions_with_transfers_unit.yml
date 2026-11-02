@@ -1,0 +1,55 @@
+# ============================================================
+# _INT_TRANSACTIONS_WITH_TRANSFERS_UNIT.YML
+# ============================================================
+#
+# PURPOSE
+# Verify transaction enrichment using controlled input records,
+# including multiple transfers, repeated tokens, and no transfers.
+#
+# EXECUTION
+# Defined in dbt Core and executed against Snowflake.
+# ============================================================
+
+version: 2
+
+unit_tests:
+  - name: test_transaction_enrichment_scenarios
+    description: >
+      Verify transfer aggregation, distinct-token counting,
+      transaction preservation, and zero-transfer handling.
+
+    model: int_transactions_with_transfers
+
+    given:
+      - input: ref('stg_transactions')
+        format: dict
+        rows:
+          - {transaction_hash: 'tx_001'}
+          - {transaction_hash: 'tx_002'}
+          - {transaction_hash: 'tx_003'}
+
+      - input: ref('stg_token_transfers')
+        format: dict
+        rows:
+          - {transaction_hash: 'tx_001', token_address: 'token_a'}
+          - {transaction_hash: 'tx_001', token_address: 'token_a'}
+          - {transaction_hash: 'tx_001', token_address: 'token_b'}
+          - {transaction_hash: 'tx_003', token_address: 'token_c'}
+
+    expect:
+      format: dict
+      rows:
+        - transaction_hash: 'tx_001'
+          transfer_count: 3
+          distinct_token_count: 2
+          has_token_transfer: true
+
+        - transaction_hash: 'tx_002'
+          transfer_count: 0
+          distinct_token_count: 0
+          has_token_transfer: false
+
+        - transaction_hash: 'tx_003'
+          transfer_count: 1
+          distinct_token_count: 1
+          has_token_transfer: true
