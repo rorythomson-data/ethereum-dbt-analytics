@@ -1,0 +1,47 @@
+
+version: 2
+
+models:
+  - name: fct_daily_token_activity
+    description: >
+      Daily token-transfer activity metrics grouped by calendar
+      date and token contract address. Metrics describe sampled
+      Ethereum transfer events, not total network activity.
+
+    columns:
+      - name: activity_date
+        description: Calendar date of the token-transfer events.
+        data_tests:
+          - not_null
+
+      - name: token_address
+        description: Contract address identifying the token.
+        data_tests:
+          - not_null
+
+      - name: transfer_count
+        description: Number of token-transfer events for the date and token.
+        data_tests:
+          - not_null
+
+      - name: transaction_count
+        description: Number of distinct transactions involving the token.
+        data_tests:
+          - not_null
+
+      - name: unique_senders
+        description: Number of distinct sending addresses.
+        data_tests:
+          - not_null
+
+      - name: unique_receivers
+        description: Number of distinct receiving addresses.
+        data_tests:
+          - not_null
+
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - activity_date
+              - token_address
