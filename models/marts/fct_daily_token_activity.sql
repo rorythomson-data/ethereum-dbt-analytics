@@ -12,7 +12,8 @@
 -- One row per activity_date and token_address.
 --
 -- MATERIALIZATION
--- Table, configured in dbt_project.yml.
+-- Incremental table using Snowflake MERGE.
+-- Configured in dbt_project.yml.
 --
 -- EXECUTION
 -- Compiled by dbt Core and executed in Snowflake.
@@ -23,7 +24,8 @@
 -- ============================================================
 
 -- 1. Reference standardized token-transfer events.
--- Each source row represents one transfer event.
+-- On incremental runs, reprocess the latest loaded date
+-- and the preceding day to accommodate recent corrections.
 WITH transfers AS (
     SELECT
         {{ to_activity_date('block_timestamp') }} AS activity_date,
@@ -32,6 +34,13 @@ WITH transfers AS (
         from_address,
         to_address
     FROM {{ ref('stg_token_transfers') }}
+
+    {% if is_incremental() %}
+    WHERE {{ to_activity_date('block_timestamp') }} >= (
+        SELECT DATEADD(day, -1, MAX(activity_date))
+        FROM {{ this }}
+    )
+    {% endif %}
 ),
 
 -- 2. Aggregate activity by date and token contract.

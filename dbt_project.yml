@@ -20,3 +20,9 @@ models:
       +materialized: view
     marts:
       +materialized: table
+      fct_daily_token_activity:
+        +materialized: incremental
+        +incremental_strategy: merge
+        +unique_key:
+          - activity_date
+          - token_address

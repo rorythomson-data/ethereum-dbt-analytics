@@ -1,14 +1,17 @@
 # Ethereum Analytics Pipeline — dbt + Snowflake
-**Status:** Snowflake infrastructure, RAW ingestion and validation, three staging models, transaction enrichment, and two analytics marts are complete. Milestone 6 adds relationship, business-rule, and unit testing; Milestone 7 introduces a reusable dbt macro for daily date conversion. The full dbt project builds successfully (6 models, 34 data tests, 1 unit test; 41/41 operations).
+
+**Status:** Milestones 1–8 implemented: Snowflake ingestion, six dbt models, automated testing, a reusable date macro, and an incremental daily token activity mart. The latest test suite passed (34 data tests and 1 unit test; 35/35). The last complete integrated `dbt build` passed in Milestone 7 (41/41 operations).
 
 ## Project Overview
+
 An analytics engineering portfolio project using Ethereum blockchain data to demonstrate ingestion, SQL transformation, data quality testing, and documentation with **Snowflake and dbt Core**.
 
-The project emphasizes layered data modeling, reproducible development samples, source-to-model validation, and documented handling of source-data anomalies. The implemented pipeline enriches transactions with aggregated token-transfer metrics and produces two analytics tables: daily transaction activity and daily token-transfer activity. Potential extensions include incremental processing, broader historical coverage, and expanded lineage documentation.
+The project emphasizes layered data modeling, reproducible development samples, source-to-model validation, and documented handling of source-data anomalies. The implemented pipeline enriches transactions with aggregated token-transfer metrics and produces two analytics tables: daily transaction activity and daily token-transfer activity. The token activity mart supports incremental `MERGE` processing. Potential extensions include additional historical partitions, automated scheduling, and expanded lineage documentation.
 
 The objective is to demonstrate a reproducible analytics engineering workflow rather than build a production-scale blockchain analytics platform.
 
 ## Technology Stack
+
 | Technology | Purpose |
 |---|---|
 | Snowflake | Ingestion, storage, views, tables, and SQL execution |
@@ -19,36 +22,38 @@ The objective is to demonstrate a reproducible analytics engineering workflow ra
 | Git / GitHub | Version control and documentation |
 
 ## Architecture
+
 The project uses an **ELT (Extract, Load, Transform)** workflow:
 
 ```text
 AWS S3 — Public Ethereum Data
-             |
-             v
+             |
+             v
 Snowflake External Stages
-             |
-             v
+             |
+             v
 ETHEREUM_PORTFOLIO.RAW
-  - TRANSACTIONS
-  - TOKEN_TRANSFERS
-  - CONTRACTS
-             |
-             v
+  - TRANSACTIONS
+  - TOKEN_TRANSFERS
+  - CONTRACTS
+             |
+             v
 Staging views
-  - stg_transactions ---------> int_transactions_with_transfers
-  - stg_token_transfers ------> int_transactions_with_transfers
-           |                               |
-           v                               v
-  fct_daily_token_activity      fct_daily_transaction_activity
-  (table: date + token)         (table: date)
-  - stg_contracts (independent staging view)
+  - stg_transactions ---------> int_transactions_with_transfers
+  - stg_token_transfers ------> int_transactions_with_transfers
+           |                               |
+           v                               v
+  fct_daily_token_activity      fct_daily_transaction_activity
+  (incremental: date + token)         (table: date)
+  - stg_contracts (independent staging view)
 ```
 
 `stg_contracts` is independent of both marts. The token activity mart reads directly from `stg_token_transfers`; the transaction activity mart reads from `int_transactions_with_transfers`.
 
-Snowflake stores the data and executes SQL. **dbt Core runs locally**, compiles model and test SQL, and submits it to Snowflake. The three staging models and intermediate model are materialized as views; both analytics marts are materialized as tables.
+Snowflake stores the data and executes SQL. **dbt Core runs locally**, compiles model and test SQL, and submits it to Snowflake. The three staging models and intermediate model are materialized as views; `fct_daily_transaction_activity` is a table, while `fct_daily_token_activity` uses incremental `merge` materialization.
 
 ### Snowflake Resources
+
 | Resource | Name / configuration |
 |---|---|
 | Database | `ETHEREUM_PORTFOLIO` |
@@ -62,6 +67,7 @@ Snowflake stores the data and executes SQL. **dbt Core runs locally**, compiles 
 The small development warehouse helps limit unnecessary compute usage.
 
 ## Data Sources
+
 Source: [AWS Public Blockchain Data](https://registry.opendata.aws/aws-public-blockchain/).
 
 | Dataset | Description |
@@ -75,6 +81,7 @@ The current development sample comes from the historical partition **2024-01-15*
 ## RAW Data Ingestion
 
 ### External Stages
+
 - `ETH_TRANSACTIONS_STAGE`
 
 - `ETH_TOKEN_TRANSFERS_STAGE`
@@ -84,6 +91,7 @@ The current development sample comes from the historical partition **2024-01-15*
 Each RAW table has one `RAW_RECORD VARIANT` column. This preserves source fields and separates ingestion from type casting and normalization in dbt.
 
 ### Development Sampling Strategy
+
 **Transactions and token transfers:**
 
 1. Select 1,000 distinct transaction hashes from token-transfer events, ordered by hash.
@@ -99,6 +107,9 @@ This relationship-aware approach provides transaction-to-transfer matches for do
 **Repeatability:** The ingestion script truncates the three RAW tables before reloading them, avoiding accumulation across runs. Sample selection is reproducible provided the underlying source files remain unchanged.
 
 ## RAW Data Validation
+
+The following results document the original January 15 sample. After the January 16 append, the RAW transaction and transfer totals are 2,000 and 3,572 respectively; the independently sampled contracts remain at 1,000 records.
+
 | Validation | Result |
 |---|---:|
 | Transactions loaded | 1,000 |
@@ -117,22 +128,25 @@ This relationship-aware approach provides transaction-to-transfer matches for do
 Every sampled transaction has at least one associated token-transfer event.
 
 ### Known Data Quality Finding: Repeated Contract Address
+
 Address `0x00ddede78cdb1c76d33c8029799aa60d5e566b38` occurs in two records with different block numbers, block hashes, block timestamps, and last-modified values. Both have `0x` bytecode; the investigation did not establish the cause of repetition.
 
 Both records are **retained in RAW and staging**. The staging model therefore does not guarantee uniqueness of `contract_address`. Any downstream one-row-per-address model must explicitly define and document a selection rule rather than silently discarding a record.
 
 ## dbt Staging Layer — Complete
+
 The staging layer extracts typed columns from RAW `VARIANT` records using `source()` references declared in `models/staging/_sources.yml`.
 
 | Model | Materialization | Grain / key | Validated rows |
 |---|---|---|---:|
-| `stg_transactions` | View | One row per `transaction_hash` | 1,000 |
-| `stg_token_transfers` | View | One row per (`transaction_hash`, `log_index`) | 1,779 |
+| `stg_transactions` | View | One row per `transaction_hash` | 2,000 |
+| `stg_token_transfers` | View | One row per (`transaction_hash`, `log_index`) | 3,572 |
 | `stg_contracts` | View | One row per source contract record; addresses may repeat | 1,000 |
 
 `stg_transactions` standardizes transaction hashes, block metadata, addresses, value in wei, gas fields, and receipt metadata. `stg_token_transfers` retains token amounts in their raw smallest-unit representation because token decimal precision has not been established. `stg_contracts` standardizes contract metadata and bytecode without deduplicating addresses.
 
 ### Automated Tests
+
 | Model | Automated checks | Passing tests |
 |---|---|---:|
 | `stg_transactions` | Non-null transaction hash; unique transaction hash; non-null block timestamp | 3 |
@@ -147,6 +161,7 @@ The contracts model intentionally has **no unique-address test**, reflecting the
 ## dbt Intermediate Layer — First Model Complete
 
 ### Transaction Enrichment
+
 | Property | Value |
 |---|---|
 | Model | `int_transactions_with_transfers` |
@@ -165,6 +180,7 @@ Token transfers are aggregated by `transaction_hash` **before** joining them to 
 | `has_token_transfer` | Whether the transaction has at least one associated transfer |
 
 ### Intermediate Model Validation
+
 The model was manually validated against the development sample from **2024-01-15** using `snowflake_setup/12_validate_int_transactions_with_transfers.sql`.
 
 | Validation | Result |
@@ -181,6 +197,7 @@ The model was manually validated against the development sample from **2024-01-1
 The results confirm the expected transaction grain and reconcile the aggregate number of transfers with the staging sample. The source sampling strategy deliberately includes only transactions with transfer events; therefore, the `LEFT JOIN` behavior for transactions without transfers is not exercised by this sample. A controlled dbt unit test now covers this case.
 
 ### Intermediate Model Automated Tests
+
 Five generic tests in `models/intermediate/_int_transactions_with_transfers.yml` check the non-null transaction hash, unique transaction hash, and non-null `transfer_count`, `distinct_token_count`, and `has_token_transfer` values.
 
 Two singular SQL tests provide additional validation:
@@ -200,6 +217,7 @@ dbt build --select +int_transactions_with_transfers
 ## dbt Analytics Marts — Two Models Complete
 
 ### Daily Transaction Activity
+
 | Property | Value |
 |---|---|
 | Model | `fct_daily_transaction_activity` |
@@ -223,7 +241,8 @@ The mart aggregates sampled transactions into daily activity metrics suitable fo
 A daily distinct-token count is intentionally not calculated by summing transaction-level distinct counts, since the same token can appear in multiple transactions.
 
 ### Mart Validation
-Manual validation is preserved in `snowflake_setup/13_validate_fct_daily_transaction_activity.sql`. The current one-day sample produced:
+
+Manual validation is preserved in `snowflake_setup/13_validate_fct_daily_transaction_activity.sql`. The original one-day sample produced:
 
 | Metric | Validated result |
 |---|---:|
@@ -241,6 +260,7 @@ Manual validation is preserved in `snowflake_setup/13_validate_fct_daily_transac
 The mart's transaction count, transfer count, transactions-with-transfers count, and total gas used **reconciled exactly** with independently aggregated intermediate-model totals.
 
 ### Mart Automated Tests
+
 Six generic tests in `models/marts/_fct_daily_transaction_activity.yml` verify non-null `activity_date`, unique `activity_date`, and non-null values for `transaction_count`, `token_transfer_count`, `transactions_with_transfers`, and `avg_transfers_per_transaction`.
 
 The singular test `tests/assert_daily_transaction_activity_reconciliation.sql` independently recalculates daily metrics from the intermediate model, compares them date by date, and checks for missing dates or metric discrepancies, including average-value differences within a defined tolerance.
@@ -248,10 +268,11 @@ The singular test `tests/assert_daily_transaction_activity_reconciliation.sql` i
 **Result:** All **7 mart tests passed** (6 generic and 1 reconciliation). Gas fields are not currently subject to generic non-null tests.
 
 ### Daily Token Activity
+
 | Property | Value |
 |---|---|
 | Model | `fct_daily_token_activity` |
-| Materialization | Table |
+| Materialization | Incremental (`merge`) |
 | Snowflake location | `ETHEREUM_PORTFOLIO.ANALYTICS` |
 | Grain | One row per (`activity_date`, `token_address`) |
 | Upstream model | `stg_token_transfers` |
@@ -270,7 +291,8 @@ The mart aggregates sampled token-transfer events by date and token contract add
 Token quantities are deliberately excluded: raw token values cannot be compared meaningfully without token-specific decimal precision and appropriate normalization.
 
 #### Token Mart Validation
-Manual validation is preserved in `snowflake_setup/14_validate_fct_daily_token_activity.sql`. For the 2024-01-15 development sample:
+
+Manual validation is preserved in `snowflake_setup/14_validate_fct_daily_token_activity.sql`. For the original 2024-01-15 development sample:
 
 | Validation | Result |
 |---|---:|
@@ -284,9 +306,10 @@ Manual validation is preserved in `snowflake_setup/14_validate_fct_daily_token_a
 The most active sampled token address, `0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2`, has 324 transfer events across 278 transactions. Another token has 52 transfer events within a single transaction, illustrating why event and distinct-transaction counts are separate metrics.
 
 #### Token Mart Automated Tests
+
 Six generic non-null checks and one `dbt_utils.unique_combination_of_columns` test (date and token address) are declared in `models/marts/_fct_daily_token_activity.yml`. The singular test `tests/assert_daily_token_activity_reconciliation.sql` independently aggregates staging data, compares all four metrics for every date/token combination, and detects missing or unexpected groups. A second singular test, `tests/assert_daily_token_activity_metrics.sql`, verifies positive counts and that distinct transaction, sender, and receiver counts do not exceed the transfer-event count.
 
-**Result:** All **8 token mart tests passed** (7 generic and 1 reconciliation). The generic test uses dbt's `arguments:` configuration for compatibility with dbt 1.12.
+**Result:** All **9 token mart tests passed** (7 generic and 2 singular). The generic test uses dbt's `arguments:` configuration for compatibility with dbt 1.12.
 
 ### Full Integrated Build
 
@@ -294,11 +317,12 @@ Six generic non-null checks and one `dbt_utils.unique_combination_of_columns` te
 dbt build
 ```
 
-**Latest validated result (Milestone 7):** **PASS=41, WARN=0, ERROR=0** — 4 views, 2 tables, 34 data tests, and 1 unit test. The integrated build validates the complete dependency graph, including the independent contracts staging model.
+**Last complete integrated build (Milestone 7):** **PASS=41, WARN=0, ERROR=0** — 4 views, 2 tables, 34 data tests, and 1 unit test. The integrated build validates the complete dependency graph, including the independent contracts staging model.
 
 The earlier full-build failure was caused by a manual, multi-statement Snowflake ingestion worksheet located inside dbt's `tests/` directory. Moving it to `snowflake_setup/test_s3_ingestion.sql` keeps the script for reference without causing dbt to parse it as a singular data test.
 
 ## Milestone 6 — Expanded Data Quality and Unit Testing
+
 Three additional checks strengthen coverage beyond basic non-null, uniqueness, and source reconciliation tests:
 
 | Check | Location | What it verifies |
@@ -333,52 +357,74 @@ Both `fct_daily_transaction_activity` and `fct_daily_token_activity` invoke `{{ 
 
 **Validation:** After refactoring, `dbt build --select fct_daily_transaction_activity` passed all 8 operations (1 table and 7 tests), and `dbt build --select fct_daily_token_activity` passed all 10 operations (1 table and 9 tests). The subsequent full `dbt build` completed with **PASS=41, WARN=0, ERROR=0** (6 models, 34 data tests, and 1 unit test). No new tests were required for the behavior-preserving macro refactor.
 
+## Milestone 8 — Incremental Processing and Two-Day Validation
+
+The development sample was extended with January 16, 2024 data using `snowflake_setup/15_load_incremental_sample.sql`. Insert-only Snowflake `MERGE` operations appended **1,000 transactions** and **1,793 token-transfer events** while retaining the January 15 sample. Repeating both ingestion operations inserted **0 additional rows**.
+
+The `fct_daily_token_activity` model is configured in `dbt_project.yml` with `materialized: incremental`, `incremental_strategy: merge`, and composite `unique_key: [activity_date, token_address]`. On incremental runs, `is_incremental()` applies a one-day lookback relative to the maximum date already present in the target table. Snowflake updates matching date/token groups and inserts new groups. This bounded lookback does not capture arbitrary older backfills or corrections.
+
+**Verified two-day results:**
+
+| Activity date | Token/date rows | Transfer events |
+|---|---:|---:|
+| 2024-01-15 | 352 | 1,779 |
+| 2024-01-16 | 387 | 1,793 |
+| **Total** | **739** | **3,572** |
+
+A `dbt run --select fct_daily_token_activity --full-refresh` created the two-day baseline. A subsequent run **without** `--full-refresh` succeeded and preserved 739 rows and 3,572 transfer events. `snowflake_setup/16_validate_incremental_processing.sql` checks date coverage, composite-key uniqueness, reconciliation with staging, null keys, and aggregate totals. The regular table mart `fct_daily_transaction_activity` was also rebuilt to reflect both dates.
+
+**Latest automated validation:** `dbt test` returned **PASS=35, WARN=0, ERROR=0** (34 data tests and one unit test). A new full integrated `dbt build` has not yet been recorded for Milestone 8.
+
+**Scope of evidence:** The dbt incremental model has been executed successfully against an existing two-day baseline and rerun with unchanged source data. An end-to-end test that loads a new date **after** that baseline and verifies newly inserted mart rows remains a future enhancement.
+
 ## Repository Structure
 
 ```text
 ethereum-dbt-analytics/
 ├── snowflake_setup/
-│   ├── 01_create_resources.sql
-│   ├── 02_create_stages.sql
-│   ├── 03_inspect_data.sql
-│   ├── 04_load_raw_data.sql
-│   ├── 05_validate_raw_data.sql
-│   ├── 06_inspect_staging_source.sql
-│   ├── 07_validate_stg_transactions.sql
-│   ├── 08_inspect_token_transfers.sql
-│   ├── 09_validate_stg_token_transfers.sql
-│   ├── 10_investigate_contract_duplicates.sql
-│   ├── 11_validate_stg_contracts.sql
-│   ├── 12_validate_int_transactions_with_transfers.sql
-│   ├── 13_validate_fct_daily_transaction_activity.sql
-│   ├── 14_validate_fct_daily_token_activity.sql
+│   ├── 01_create_resources.sql
+│   ├── 02_create_stages.sql
+│   ├── 03_inspect_data.sql
+│   ├── 04_load_raw_data.sql
+│   ├── 05_validate_raw_data.sql
+│   ├── 06_inspect_staging_source.sql
+│   ├── 07_validate_stg_transactions.sql
+│   ├── 08_inspect_token_transfers.sql
+│   ├── 09_validate_stg_token_transfers.sql
+│   ├── 10_investigate_contract_duplicates.sql
+│   ├── 11_validate_stg_contracts.sql
+│   ├── 12_validate_int_transactions_with_transfers.sql
+│   ├── 13_validate_fct_daily_transaction_activity.sql
+│   ├── 14_validate_fct_daily_token_activity.sql
+│   ├── 15_load_incremental_sample.sql
+│   ├── 16_validate_incremental_processing.sql
 │   └── test_s3_ingestion.sql
 ├── models/
-│   ├── staging/
-│   │   ├── _sources.yml
-│   │   ├── stg_transactions.sql
-│   │   ├── _stg_transactions.yml
-│   │   ├── stg_token_transfers.sql
-│   │   ├── _stg_token_transfers.yml
-│   │   ├── stg_contracts.sql
-│   │   └── _stg_contracts.yml
-│   ├── intermediate/
-│   │   ├── int_transactions_with_transfers.sql
-│   │   ├── _int_transactions_with_transfers.yml
-│   │   └── _int_transactions_with_transfers_unit.yml
-│   └── marts/
-│       ├── fct_daily_transaction_activity.sql
-│       ├── _fct_daily_transaction_activity.yml
-│       ├── fct_daily_token_activity.sql
-│       └── _fct_daily_token_activity.yml
+│   ├── staging/
+│   │   ├── _sources.yml
+│   │   ├── stg_transactions.sql
+│   │   ├── _stg_transactions.yml
+│   │   ├── stg_token_transfers.sql
+│   │   ├── _stg_token_transfers.yml
+│   │   ├── stg_contracts.sql
+│   │   └── _stg_contracts.yml
+│   ├── intermediate/
+│   │   ├── int_transactions_with_transfers.sql
+│   │   ├── _int_transactions_with_transfers.yml
+│   │   └── _int_transactions_with_transfers_unit.yml
+│   └── marts/
+│       ├── fct_daily_transaction_activity.sql
+│       ├── _fct_daily_transaction_activity.yml
+│       ├── fct_daily_token_activity.sql
+│       └── _fct_daily_token_activity.yml
 ├── macros/
-│   └── to_activity_date.sql
+│   └── to_activity_date.sql
 ├── tests/
-│   ├── assert_transaction_transfer_metrics.sql
-│   ├── assert_transaction_transfer_reconciliation.sql
-│   ├── assert_daily_transaction_activity_reconciliation.sql
-│   ├── assert_daily_token_activity_reconciliation.sql
-│   └── assert_daily_token_activity_metrics.sql
+│   ├── assert_transaction_transfer_metrics.sql
+│   ├── assert_transaction_transfer_reconciliation.sql
+│   ├── assert_daily_transaction_activity_reconciliation.sql
+│   ├── assert_daily_token_activity_reconciliation.sql
+│   └── assert_daily_token_activity_metrics.sql
 ├── seeds/
 ├── analyses/
 ├── docs/
@@ -395,11 +441,13 @@ The numbered `snowflake_setup/` scripts preserve the manual Snowflake developmen
 ## Getting Started
 
 ### 1. Snowflake Environment
-Create a Snowflake account with suitable access and compute credits. Execute `01_create_resources.sql` through `05_validate_raw_data.sql` in numerical order in Snowflake worksheets. Scripts `06`–`14` document subsequent source inspection, anomaly investigation, and staging, intermediate, and mart validation; run them after creating the referenced dbt models. The manual `test_s3_ingestion.sql` is an optional isolated ingestion check.
+
+Create a Snowflake account with suitable access and compute credits. Execute `01_create_resources.sql` through `05_validate_raw_data.sql` in numerical order in Snowflake worksheets. Scripts `06`–`14` document subsequent source inspection, anomaly investigation, and model validation; run them after creating the referenced dbt models. After loading the initial sample, run `15_load_incremental_sample.sql` to append January 16, then build the dbt models and run the read-only checks in `16_validate_incremental_processing.sql`. The manual `test_s3_ingestion.sql` is an optional isolated ingestion check.
 
 **Caution:** `04_load_raw_data.sql` truncates and reloads the three RAW tables. It replaces their existing contents.
 
 ### 2. Local dbt Environment
+
 From the repository root, create and activate a virtual environment (PowerShell example):
 
 ```powershell
@@ -422,6 +470,7 @@ dbt build
 **Environment note:** During development, an optional `dbt-state` integration prompted browser authentication. The local session used `DBT_ENGINE_MANAGE_STATE=0` to disable it, which produced a reserved-environment-variable deprecation warning. A clean, reproducible long-term configuration for that optional component remains to be resolved; the full dbt build passed despite the warning.
 
 ## Planned Enhancements
+
 - **Additional intermediate models:** Further reusable transformations and explicit handling of duplicate contract addresses where required.
 
 - **Additional analytics marts:** More analysis-ready datasets and reconciliation checks.
@@ -430,27 +479,30 @@ dbt build
 
 - **Macros:** Reusable SQL/Jinja logic where beneficial.
 
-- **Incremental processing:** Demonstrate incremental models and rerun behavior.
+- **Incremental new-data test:** Demonstrate insertion of newly arriving date/token groups after the initial dbt incremental build.
 
 - **Documentation and lineage:** Expand column descriptions and generated dbt documentation.
 
 - **Broader sample:** Extend ingestion to additional dates to support meaningful time-series analysis.
 
-These are **future enhancements**, not implemented features.
+These are **future enhancements**, not implemented features beyond the two-day sample already described.
 
 ## Data Provenance and Limitations
+
 Source: [AWS Public Blockchain Data](https://registry.opendata.aws/aws-public-blockchain/).
 
-The sample covers a single historical date and is not representative of all Ethereum activity. The sampling intentionally selects transactions with token transfers; it cannot estimate the share of all transactions that emit transfers. Accordingly, the current mart reports activity for the **sampled transactions**, not network-wide totals or the true proportion of transactions with transfers. Contract sampling is independent and does not ensure coverage of token addresses in the transfer sample.
+The transaction and transfer samples cover two historical dates and are not representative of all Ethereum activity; contract records cover one date. The sampling intentionally selects transactions with token transfers; it cannot estimate the share of all transactions that emit transfers. Accordingly, the current mart reports activity for the **sampled transactions**, not network-wide totals or the true proportion of transactions with transfers. Contract sampling is independent and does not ensure coverage of token addresses in the transfer sample.
 
 Blockchain addresses do not necessarily represent distinct people, and token transfers should not automatically be interpreted as commercial payments. Token `value` fields are not normalized to display units without token-specific decimal metadata. Review source terms and redistribution permissions before distributing source-derived data.
 
 ## Reproducibility and Security
+
 The repository contains SQL and dbt definitions needed to recreate the demonstrated development workflow. Reproduction requires a separate Snowflake account and access to the public AWS datasets, not the author's trial account.
 
 Never commit passwords, access tokens, private keys, `.env` files, a real `profiles.yml`, or other secrets. Review exported Snowflake worksheets before committing them.
 
 ## Project Origin
+
 This is an independent portfolio implementation building on dbt concepts previously studied in an Ethereum-focused course. The ingestion workflow, models, tests, and documentation are being developed and validated for this repository. Any reused course material should be attributed appropriately.
 
 
