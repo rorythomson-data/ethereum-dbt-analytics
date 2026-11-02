@@ -26,7 +26,7 @@
 -- Each source row represents one transfer event.
 WITH transfers AS (
     SELECT
-        CAST(block_timestamp AS DATE) AS activity_date,
+        {{ to_activity_date('block_timestamp') }} AS activity_date,
         token_address,
         transaction_hash,
         from_address,

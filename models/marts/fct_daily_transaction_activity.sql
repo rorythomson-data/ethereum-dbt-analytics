@@ -46,7 +46,7 @@ WITH transactions AS (
 daily_activity AS (
 
     SELECT
-        CAST(block_timestamp AS DATE) AS activity_date,
+        {{ to_activity_date('block_timestamp') }} AS activity_date,
 
         COUNT(*) AS transaction_count,
 
@@ -63,7 +63,7 @@ daily_activity AS (
     FROM transactions
 
     GROUP BY
-        CAST(block_timestamp AS DATE)
+        {{ to_activity_date('block_timestamp') }}
 
 )
 
