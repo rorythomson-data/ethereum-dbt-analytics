@@ -4,11 +4,20 @@
 
 ## Project Overview
 
-An analytics engineering portfolio project using Ethereum blockchain data to demonstrate ingestion, SQL transformation, data quality testing, and documentation with **Snowflake and dbt Core**.
+An end-to-end analytics engineering portfolio project that transforms public Ethereum blockchain data into validated, analysis-ready datasets using **Snowflake, SQL, and dbt Core**.
 
-The project emphasizes layered data modeling, reproducible development samples, source-to-model validation, and documented handling of source-data anomalies. The implemented pipeline enriches transactions with aggregated token-transfer metrics and produces two analytics tables: daily transaction activity and daily token-transfer activity. The token activity mart supports incremental `MERGE` processing. Potential extensions include additional historical partitions, automated scheduling, and expanded lineage documentation.
+The pipeline ingests Parquet data from Amazon S3 into Snowflake, applies layered transformations through dbt, and produces daily transaction and token-transfer activity marts.
 
-The objective is to demonstrate a reproducible analytics engineering workflow rather than build a production-scale blockchain analytics platform.
+**Key engineering features:**
+
+- **ELT architecture:** Snowflake external stages, RAW `VARIANT` storage, and dbt staging, intermediate, and mart layers.
+- **Data modeling:** Transaction-level enrichment with pre-aggregated token transfers to prevent join fanout.
+- **Incremental processing:** Snowflake `MERGE` with a composite date/token key and a one-day lookback window.
+- **Data quality:** 34 automated data tests and one unit test, all passing.
+- **Validated ingestion:** Three historical partitions containing 3,000 sampled transactions and 5,508 token-transfer events.
+- **Reproducibility:** Version-controlled SQL scripts, documented validation procedures, and Git-based development.
+
+**Current scope:** A working development pipeline using a deliberately limited, non-representative Ethereum sample. The objective is to demonstrate analytics engineering practices rather than estimate network-wide blockchain activity.
 
 ## Technology Stack
 
@@ -20,37 +29,50 @@ The objective is to demonstrate a reproducible analytics engineering workflow ra
 | AWS Public Blockchain Data | Public Ethereum Parquet datasets in Amazon S3 |
 | Python 3.12 | Local virtual environment for dbt |
 | Git / GitHub | Version control and documentation |
-
 ## Architecture
 
-The project uses an **ELT (Extract, Load, Transform)** workflow:
+The project follows an **ELT (Extract, Load, Transform)** architecture. Public Ethereum Parquet data is accessed through Snowflake external stages and loaded into RAW tables using `VARIANT` columns. dbt transforms the data into typed staging views, an intermediate transaction-enrichment view, and two analytics marts.
 
-```text
-AWS S3 — Public Ethereum Data
-             |
-             v
-Snowflake External Stages
-             |
-             v
-ETHEREUM_PORTFOLIO.RAW
-  - TRANSACTIONS
-  - TOKEN_TRANSFERS
-  - CONTRACTS
-             |
-             v
-Staging views
-  - stg_transactions ---------> int_transactions_with_transfers
-  - stg_token_transfers ------> int_transactions_with_transfers
-           |                               |
-           v                               v
-  fct_daily_token_activity      fct_daily_transaction_activity
-  (incremental: date + token)         (table: date)
-  - stg_contracts (independent staging view)
+**Execution environments:**
+
+- **Snowflake:** Stores RAW and transformed data, executes SQL transformations and tests, and performs incremental `MERGE` operations.
+- **dbt Core (local environment):** Compiles SQL and Jinja, manages model dependencies, and submits transformations and tests to Snowflake.
+
+### dbt Model Lineage
+
+The following diagram shows the dependencies between the six dbt models and their Snowflake RAW sources. Downstream models reference upstream models using dbt `ref()`.
+
+```mermaid
+flowchart TD
+    A["RAW.TRANSACTIONS"] --> B["stg_transactions"]
+    C["RAW.TOKEN_TRANSFERS"] --> D["stg_token_transfers"]
+    E["RAW.CONTRACTS"] --> F["stg_contracts"]
+
+    B --> G["int_transactions_with_transfers"]
+    D --> G
+
+    G --> H["fct_daily_transaction_activity"]
+    D --> I["fct_daily_token_activity"]
+
+    classDef raw fill:#e8edf3,stroke:#64748b,color:#1e293b
+    classDef staging fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
+    classDef intermediate fill:#fef3c7,stroke:#d97706,color:#78350f
+    classDef mart fill:#dcfce7,stroke:#16a34a,color:#14532d
+
+    class A,C,E raw
+    class B,D,F staging
+    class G intermediate
+    class H,I mart
 ```
 
-`stg_contracts` is independent of both marts. The token activity mart reads directly from `stg_token_transfers`; the transaction activity mart reads from `int_transactions_with_transfers`.
+The architecture separates ingestion, standardization, enrichment, and analytical aggregation:
 
-Snowflake stores the data and executes SQL. **dbt Core runs locally**, compiles model and test SQL, and submits it to Snowflake. The three staging models and intermediate model are materialized as views; `fct_daily_transaction_activity` is a table, while `fct_daily_token_activity` uses incremental `merge` materialization.
+- **RAW layer:** Preserves source records in Snowflake `VARIANT` columns.
+- **Staging layer:** Three views extract and standardize typed fields from RAW records.
+- **Intermediate layer:** `int_transactions_with_transfers` aggregates transfer events before joining them to transactions, preventing one-to-many join fanout.
+- **Analytics marts:** `fct_daily_transaction_activity` is materialized as a table at daily grain, while `fct_daily_token_activity` uses incremental `MERGE` processing at the date/token grain.
+
+The `stg_contracts` model is currently independent of both marts. The token activity mart reads directly from `stg_token_transfers`, while the transaction activity mart depends on `int_transactions_with_transfers`.
 
 ### Snowflake Resources
 
